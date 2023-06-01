@@ -29,10 +29,13 @@ MFRC522 rfidReader(23, 25); //(NSS/RST)
 EthernetServer webServer(80);
 
 //Helper Variablen für die "Timer" Funktion damit das Display nach x Sekunden gelöscht wird
-long lcdWriteTime = 2000;
+unsigned long lcdWriteTime = 2000;
+
+//Helper Variable um die Uhrzeit abzufragen
+bool bereitsAbgefragt = false;
 
 EthernetUDP UdpClient;
-NTPClient timeClient(UdpClient);
+NTPClient timeClient(UdpClient, "europe.pool.ntp.org");
 
 // Configures CET/CEST
 TimeChangeRule CEST = {"CEST", Last, Sun, Mar, 2, 120};     // Central European Summer Time
@@ -57,23 +60,22 @@ void setup() {
   Serial.println("Ethernet Start");
   // variable to hold Ethernet shield MAC address
   byte mac[] = { 0xA8, 0x61, 0x0A, 0xAE, 0x86, 0x76 };
-  byte ip[] = {192,168,1,205};
-  byte dns[] = {192,168,1,1};
-  byte gateway[] = {192,168,1,1};
+  byte ip[] = {10,100,128,21};
+  byte dns[] = {10,100,128,201};
+  byte gateway[] = {10,100,128,111};
   byte subnet[] = {255,255,255,0};
 
   Ethernet.begin(mac, ip, dns, gateway, subnet);
+
+  delay(2000);
+  Serial.println(Ethernet.localIP());
 
   UdpClient.begin(localPort);
   webServer.begin();
   timeClient.begin();
   delay(1000);
-  
-  while(!timeClient.update()){delay(1000); Serial.println("NTP Update didn't work!");}
-  
-  Serial.println ( "Adjust local clock" );
-  unsigned long epoch = timeClient.getEpochTime();
-  setTime(epoch - 946684800);
+
+  GetSetTime();
   
   lcd.clear();
   lcd.setCursor(0,0);
@@ -91,20 +93,28 @@ void loop(){
   EthernetClient webClient = webServer.available();
   
   if(!rfidReader.PICC_IsNewCardPresent() && !(active_low ^ digitalRead(TouchSensor)) && !webClient){
+    if(lcdWriteTime + 120000 < millis()){
+      lcd.noBacklight();
+      GetSetTime();
+      lcdWriteTime = 4294767000;
+    }
     if(lcdWriteTime + TimeDisplayClear < millis()){
       lcd.clear();
-      lcdWriteTime = 0;
     }
+
     return;
   }
+  lcd.clear();
+  lcd.backlight();
+  bereitsAbgefragt = false;
   if((active_low ^ digitalRead(TouchSensor))){
     char ResultFing[5];
     ReadFingerprint(ResultFing);
-    if(ResultFing[0] != '-' && ResultFing[1] != '1'){
+    if(ResultFing[0] != '-'){
       Ausgabe(ResultFing, true);
-      while(active_low ^ digitalRead(TouchSensor)){
+    }
+    while(active_low ^ digitalRead(TouchSensor)){
       
-      }
     }
   }
   else if(webClient){
@@ -174,10 +184,23 @@ void loop(){
       }
     }
     else if(strcmp(nachricht[0], "Card") == 0){
-      lcdprint("Warte auf Karte");
-      while(!rfidReader.PICC_IsNewCardPresent()){
-      
+      lcd.clear();
+      lcd.setCursor(0,0);
+      lcd.print("Warte auf Karte");
+
+      long waitingTime = millis();
+      while(!rfidReader.PICC_IsNewCardPresent() && waitingTime+20000 > millis()){
+        
       }
+
+      if(waitingTime+30000<millis()){
+        lcdprint("Vorgang abgebrochen");
+        lcd.setCursor(0,1);
+        lcd.print("Zu langsam");
+        Serial.println("Karte wurde nicht eingelesen (zu langsam)");
+        return;
+      }
+      
       rfidReader.PICC_ReadCardSerial();
       char UID[32];
       ReadNFCTag(UID);
@@ -200,6 +223,16 @@ void loop(){
     ReadNFCTag(ResultRfid);
     Ausgabe(ResultRfid, false);
   }
+}
+
+void GetSetTime(){
+  lcdprint("Zeit aktualisieren");
+  
+  while(!timeClient.update()){delay(1000); Serial.println("NTP Update didn't work!");}
+  
+  Serial.println ( "Adjust local clock" );
+  unsigned long epoch = timeClient.getEpochTime();
+  setTime(epoch - 946684800);
 }
 
 void ReadFingerprint(char Result[]){
@@ -230,6 +263,7 @@ void ReadFingerprint(char Result[]){
     fingerprintsen.LEDcontrol(FINGERPRINT_LED_OFF, 0, FINGERPRINT_LED_BLUE); // Fingerabdruck nicht in Datenbank
     fingerprintsen.LEDcontrol(FINGERPRINT_LED_GRADUAL_OFF, 500, FINGERPRINT_LED_RED);
     Serial.println("Fingerprint nicht in Datenbank");
+    lcdprint("Fingerabdruck wurde", "nicht gefunden","","");
     Result[0] = '-';
     Result[1] = '1';
     return;
@@ -270,7 +304,7 @@ void Ausgabe(char ID[], bool which){ //which gibt an ob Fingerabdruck oder RFID 
         return;
       }
     }
-    
+
     char data[4][20];
     getData(ID, data);
     char zeile1[20] = "";
@@ -364,14 +398,14 @@ void array_to_string(byte array[], unsigned int len, char buffer[])
 void Send_Http(char Request[]){
   EthernetClient client;
   // connect to web server on port 80:
-  byte server[] = {10,0,0,21};
+  byte server[] = {10,100,128,1};
   if(client.connect(server, 80)) {
     // if connected:
     Serial.println("Connected to server");
     // make a HTTP request:
     // send HTTP header
     client.println("GET " + String(Request) + " HTTP/1.1");
-    client.println("Host: 10.0.0.21");
+    client.println("Host: 10.100.128.168");
     client.println("Connection: close");
     client.println(); // end HTTP header
 
@@ -396,7 +430,7 @@ void convertRFIDtoFinger(char ID[]){
   EthernetClient client;
   char bufres[20];
   // connect to web server on port 80:
-  byte server[] = {10,0,0,21};
+  byte server[] = {10,100,128,1};
   if(client.connect(server, 80)) {
     // if connected:
     Serial.println("Connected to server");
@@ -406,7 +440,7 @@ void convertRFIDtoFinger(char ID[]){
     strcat(request,ID);
     Serial.println(request);
     client.println("GET " + String(request) + " HTTP/1.1");
-    client.println("Host: 10.0.0.21");
+    client.println("Host: 10.100.128.168");
     client.println("Connection: close");
     client.println(); // end HTTP header
 
@@ -457,7 +491,7 @@ void convertRFIDtoFinger(char ID[]){
 void getData(char* Mitarbeiternummer, char result[][20]){
   EthernetClient client;
   // connect to web server on port 80:
-  byte server[] = {10,0,0,21};
+  byte server[] = {10,100,128,1};
   if(client.connect(server, 80)) {
     // if connected:
     Serial.println("Connected to server");
@@ -556,14 +590,20 @@ int AddFinger(int id){
   } else {
     Serial.print("Unknown error: 0x"); Serial.println(x, HEX);
   }
-  
+
   int p = -1;
-  lcdprint("Warte auf Finger");
-  while (p != FINGERPRINT_OK) {
+
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Warte auf Finger");
+  
+  long waitingTime = millis();
+  while (p != FINGERPRINT_OK && waitingTime+20000 > millis()) {
     p = fingerprintsen.getImage();
     switch (p) {
     case FINGERPRINT_OK:
       lcdprint("Finger gefunden");
+      Serial.print("Finger gefunden");
       break;
     case FINGERPRINT_NOFINGER:
       //Serial.println(".");
@@ -578,6 +618,14 @@ int AddFinger(int id){
       lcdprint("Unknown error");
       break;
     }
+  }
+
+  if(waitingTime+30000<millis()){
+    lcdprint("Vorgang Abgebrochen");
+    lcd.setCursor(0,1);
+    lcd.print("Zu langsam");
+    Serial.println("Finger wurde nicht eingelesen (zu langsam)");
+    return;
   }
 
   // OK success!
