@@ -304,6 +304,13 @@ void Ausgabe(char ID[], bool which){ //which gibt an ob Fingerabdruck oder RFID 
         return;
       }
     }
+    else{
+      convertFingertoID(ID);
+
+      if(strcmp(ID, "-1") == 0){
+        return;
+      }
+    }
 
     char data[4][20];
     getData(ID, data);
@@ -477,6 +484,68 @@ void convertRFIDtoFinger(char ID[]){
       Serial.println(bufres);
 
       strcpy(ID,bufres);
+    }
+    
+    // the server's disconnected, stop the client:
+    client.stop();
+    Serial.println();
+    Serial.println("disconnected");
+  } else {// if not connected:
+    Serial.println("connection failed");
+  }
+}
+
+void convertFingertoID(char Finger[]){
+  EthernetClient client;
+  char bufres[20];
+  // connect to web server on port 80:
+  byte server[] = {10,100,128,1};
+  if(client.connect(server, 80)) {
+    // if connected:
+    Serial.println("Connected to server");
+    // make a HTTP request:
+    // send HTTP header
+    char request[40] = "/convert_finger_to_ID.php?Finger=";
+    strcat(request,Finger);
+    Serial.println(request);
+    client.println("GET " + String(request) + " HTTP/1.1");
+    client.println("Host: 10.100.128.168");
+    client.println("Connection: close");
+    client.println(); // end HTTP header
+
+    bool data = false;
+    memset(bufres,0,20);
+    
+    int i = 0;
+    while(client.connected()) {
+      if(client.available()){
+        char c = client.read();
+        if(data){
+            bufres[i] = c;
+            i++;
+        }
+
+        if(c == '!'){
+          data = true;
+        }
+
+        Serial.print(c);
+      }
+    }
+
+    if(strcmp(bufres, "") == 0){
+      lcdprint("Kein Mitarbeiter");
+      lcd.setCursor(0,1);
+      lcd.print("gefunden");
+
+      strcpy(Finger, "-1");
+    }
+    else{
+      Serial.println();
+      Serial.println("Jetzt Data");
+      Serial.println(bufres);
+
+      strcpy(Finger,bufres);
     }
     
     // the server's disconnected, stop the client:
