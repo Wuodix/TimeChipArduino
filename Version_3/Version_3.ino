@@ -189,7 +189,7 @@ void loop(){
       lcd.print("Warte auf Karte");
 
       long waitingTime = millis();
-      while(!rfidReader.PICC_IsNewCardPresent() && waitingTime+20000 > millis()){
+      while(!rfidReader.PICC_IsNewCardPresent() && waitingTime+30000 > millis()){
         
       }
 
@@ -198,6 +198,8 @@ void loop(){
         lcd.setCursor(0,1);
         lcd.print("Zu langsam");
         Serial.println("Karte wurde nicht eingelesen (zu langsam)");
+        webClient.println("ZU LANGSAM");
+        webClient.stop();
         return;
       }
       
@@ -667,7 +669,7 @@ int AddFinger(int id){
   lcd.print("Warte auf Finger");
   
   long waitingTime = millis();
-  while (p != FINGERPRINT_OK && waitingTime+20000 > millis()) {
+  while (p != FINGERPRINT_OK && waitingTime+30000 > millis()) {
     p = fingerprintsen.getImage();
     switch (p) {
     case FINGERPRINT_OK:
